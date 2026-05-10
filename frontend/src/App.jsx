@@ -3,6 +3,8 @@ import Navbar from './components/Navbar'
 import Compare from './pages/Compare'
 import Regressions from './pages/Regressions'
 import Systems from './pages/Systems'
+import Runs from './pages/Runs'
+import RunDetail from './pages/RunDetail'
 
 export default function App() {
   return (
@@ -15,6 +17,8 @@ export default function App() {
             <Route path="/compare"     element={<Compare />} />
             <Route path="/regressions" element={<Regressions />} />
             <Route path="/systems"     element={<Systems />} />
+            <Route path="/runs"        element={<Runs />} />
+            <Route path="/runs/:id"    element={<RunDetail />} />
           </Routes>
         </main>
       </div>

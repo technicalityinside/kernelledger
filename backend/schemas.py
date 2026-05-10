@@ -43,17 +43,38 @@ class ResultIn(BaseModel):
 
 
 class PushPayload(BaseModel):
-    system:        SystemIn
-    kernel:        KernelIn
-    workload:      str
-    config_preset: Optional[str] = None
-    workload_args: Dict[str, Any] = {}
-    ran_at:        Optional[datetime] = None
-    run_by:        Optional[str] = None
-    results:       List[ResultIn]
+    system:          SystemIn
+    kernel:          KernelIn
+    workload:        str
+    config_preset:   Optional[str] = None
+    workload_args:   Dict[str, Any] = {}
+    ran_at:          Optional[datetime] = None
+    run_by:          Optional[str] = None
+    system_snapshot: Dict[str, Any] = {}
+    results:         List[ResultIn]
 
 
 class PushResponse(BaseModel):
     run_id:    int
     system_id: int
     kernel_id: int
+
+
+class ResultOut(BaseModel):
+    metric_name: str
+    value: float
+    iteration: int
+    model_config = {"from_attributes": True}
+
+
+class RunDetail(BaseModel):
+    id: int
+    workload: str
+    config_preset: Optional[str]
+    workload_args: Dict[str, Any]
+    ran_at: Optional[datetime]
+    system: SystemOut
+    kernel: KernelOut
+    system_snapshot: Dict[str, Any]
+    results: List[ResultOut]
+    model_config = {"from_attributes": True}

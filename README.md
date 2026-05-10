@@ -1,4 +1,4 @@
-# Garuda Performance Portal
+# Garuda Kernel Ledger
 
 A web application for tracking, visualising, and comparing benchmark results across kernel versions, hardware configurations, and system setups. Results are pushed from the Garuda toolkit CLI and stored in PostgreSQL. The frontend provides three interactive views built with React and Plotly.
 

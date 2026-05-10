@@ -12,11 +12,12 @@ export default function Navbar() {
     <nav className="border-b border-gray-800 bg-gray-900/80 backdrop-blur sticky top-0 z-10">
       <div className="max-w-7xl mx-auto px-6 flex items-center gap-1 h-14">
         <span className="text-base font-bold text-white mr-6 tracking-tight">
-          Garuda <span className="text-blue-400 font-normal">Portal</span>
+          Garuda <span className="text-blue-400 font-normal">Kernel Ledger</span>
         </span>
         <NavLink to="/compare"     className={link}>Compare</NavLink>
         <NavLink to="/regressions" className={link}>Regressions</NavLink>
         <NavLink to="/systems"     className={link}>Systems</NavLink>
+        <NavLink to="/runs"        className={link}>Runs</NavLink>
       </div>
     </nav>
   )

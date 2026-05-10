@@ -51,8 +51,9 @@ class Run(Base):
     workload      = Column(String, nullable=False, index=True)
     config_preset = Column(String)
     workload_args = Column(JSON, default=dict)
-    ran_at        = Column(DateTime, default=datetime.utcnow)
-    run_by        = Column(String)
+    ran_at          = Column(DateTime, default=datetime.utcnow)
+    run_by          = Column(String)
+    system_snapshot = Column(JSON, default=dict)
 
     system  = relationship("System", back_populates="runs")
     kernel  = relationship("Kernel", back_populates="runs")

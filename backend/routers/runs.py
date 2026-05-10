@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Kernel, Result, Run, System
 from regression import detect_regressions
-from schemas import PushPayload, PushResponse
+from schemas import PushPayload, PushResponse, RunDetail
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -40,13 +40,14 @@ def push_run(payload: PushPayload, db: Session = Depends(get_db)):
 
     # Create run
     run = Run(
-        system_id     = system.id,
-        kernel_id     = kernel.id,
-        workload      = payload.workload,
-        config_preset = payload.config_preset,
-        workload_args = payload.workload_args,
-        ran_at        = payload.ran_at or datetime.utcnow(),
-        run_by        = payload.run_by,
+        system_id       = system.id,
+        kernel_id       = kernel.id,
+        workload        = payload.workload,
+        config_preset   = payload.config_preset,
+        workload_args   = payload.workload_args,
+        ran_at          = payload.ran_at or datetime.utcnow(),
+        run_by          = payload.run_by,
+        system_snapshot = payload.system_snapshot,
     )
     db.add(run)
     db.flush()
@@ -64,6 +65,25 @@ def push_run(payload: PushPayload, db: Session = Depends(get_db)):
     detect_regressions(db, system.id, payload.workload, payload.config_preset)
 
     return PushResponse(run_id=run.id, system_id=system.id, kernel_id=kernel.id)
+
+
+@router.get("/{run_id}", response_model=RunDetail)
+def get_run(run_id: int, db: Session = Depends(get_db)):
+    run = db.query(Run).filter(Run.id == run_id).first()
+    if not run:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Run not found")
+    return RunDetail(
+        id=run.id,
+        workload=run.workload,
+        config_preset=run.config_preset,
+        workload_args=run.workload_args or {},
+        ran_at=run.ran_at,
+        system=run.system,
+        kernel=run.kernel,
+        system_snapshot=run.system_snapshot or {},
+        results=run.results,
+    )
 
 
 @router.get("")
@@ -88,8 +108,11 @@ def list_runs(
             "workload":      r.workload,
             "config_preset": r.config_preset,
             "system":        r.system.name,
+            "system_id":     r.system.id,
             "kernel":        r.kernel.version,
+            "kernel_id":     r.kernel.id,
             "ran_at":        r.ran_at,
+            "workload_args": r.workload_args,
         }
         for r in runs
     ]

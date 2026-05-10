@@ -19,4 +19,5 @@ export const api = {
   systems:         ()       => get('/systems'),
   kernels:         ()       => get('/kernels'),
   runs:            (p = {}) => get('/runs',              p),
+  runDetail:       (id)     => get(`/runs/${id}`),
 }
