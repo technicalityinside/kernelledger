@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from auth import require_push_key
 from database import get_db
 from models import Kernel, Result, Run, System
 from regression import detect_regressions
@@ -13,7 +14,7 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 
 
 @router.post("", response_model=PushResponse, status_code=201)
-def push_run(payload: PushPayload, db: Session = Depends(get_db)):
+def push_run(payload: PushPayload, db: Session = Depends(get_db), _: None = Depends(require_push_key)):
     # Upsert system (match on name)
     system = db.query(System).filter(System.name == payload.system.name).first()
     if not system:

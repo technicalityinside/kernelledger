@@ -20,6 +20,7 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://garuda:garuda@db:5432/garuda
+      PUSH_API_KEY: ${PUSH_API_KEY:?PUSH_API_KEY must be set}
     ports:
       - "8000:8000"
     depends_on:
