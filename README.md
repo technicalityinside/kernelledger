@@ -188,6 +188,18 @@ The dev server starts at `http://localhost:5173`.
 
 ## Pushing Results from Garuda
 
+There are three ways to get results into the Kernel Ledger:
+
+| Method | Description |
+|---|---|
+| `push` | Manual one-off push of a saved run |
+| `kernel-analyze` | Fully automated local multi-kernel pipeline (auto-pushes after each kernel) |
+| `cloud-kernel-analyze` | Same pipeline on a cloud VM (GCP / AWS / Azure) |
+
+---
+
+### Manual push
+
 After running any benchmark, push results to the portal with the `push` subcommand:
 
 ```bash
@@ -226,6 +238,32 @@ The command reads `results/<run-id>/results.json`, auto-detects:
 In addition, the full kernel configuration snapshot is captured at push time and stored alongside the results. This snapshot covers CPU power management, scheduler settings, memory/VM knobs, CPU isolation, I/O schedulers, network settings, kernel boot parameters, and security mitigation status.
 
 Each `(workload, config_preset)` combination within the run is pushed as a separate entry and appears independently in the portal's selectors.
+
+### Automated push via kernel-analyze
+
+`kernel-analyze` and `cloud-kernel-analyze` push results automatically after each kernel without any extra steps. Pass `--push-url` and `--api-key` (or `$GARUDA_API_KEY`) when starting the session:
+
+```bash
+# Local — installs kernels, reboots, benchmarks, and pushes automatically
+sudo python3 main.py kernel-analyze \
+  --kernels 6.8.0-55-generic,6.11.0-25-generic,6.12.0-10-generic \
+  --workloads schbench,hackbench,stream,fio \
+  --iterations 5 \
+  --push-url http://perf.example.com \
+  --api-key your-api-key \
+  --kernel-config distro-ubuntu
+
+# Cloud — same pipeline on a GCP/AWS/Azure VM
+python3 main.py cloud-kernel-analyze \
+  --provider gcp --region us-central1 --instance-type n2-standard-8 \
+  --kernels 6.8.0-55-generic,6.11.0-25-generic,6.12.0-10-generic \
+  --workloads schbench,hackbench,stream,fio \
+  --config 4c4t --iterations 5 \
+  --push-url http://perf.example.com \
+  --api-key your-api-key
+```
+
+After all kernels are benchmarked the portal's **Compare** and **Regressions** pages will immediately show data across all three kernel versions.
 
 ### Automating pushes after every run
 
