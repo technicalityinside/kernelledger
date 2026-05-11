@@ -3,42 +3,27 @@ import Plot from 'react-plotly.js'
 import { api } from '../api'
 import Select from '../components/Select'
 
-const PALETTE = [
+// Palette for series (workload/metric groups on X-axis)
+const SERIES_PALETTE = [
   '#3b82f6', '#22c55e', '#f59e0b', '#ef4444',
   '#a855f7', '#06b6d4', '#f97316', '#ec4899',
 ]
-const clr = i => PALETTE[i % PALETTE.length]
-
-const LAYOUT_BASE = {
-  paper_bgcolor: 'transparent',
-  plot_bgcolor:  'transparent',
-  font:  { color: '#e5e7eb', size: 12 },
-  xaxis: { gridcolor: '#1f2937', zeroline: false, tickangle: -30 },
-  yaxis: { gridcolor: '#1f2937', zeroline: false },
-  hovermode: 'x unified',
-  legend: {
-    bgcolor: 'rgba(15,23,42,0.8)',
-    bordercolor: '#374151',
-    borderwidth: 1,
-    orientation: 'h',
-    yanchor: 'bottom', y: 1.02,
-    xanchor: 'left',   x: 0,
-  },
-}
+// Palette for kernel versions (bar colors within each group)
+const KERNEL_PALETTE = [
+  '#6366f1', '#10b981', '#f59e0b', '#ef4444',
+  '#8b5cf6', '#14b8a6', '#f97316', '#e879f9',
+]
+const kclr = i => KERNEL_PALETTE[i % KERNEL_PALETTE.length]
 
 let _uid = 0
 const nextId = () => ++_uid
 
-function fmt(v, decimals = 3) {
-  return v == null ? '—' : Number(v).toFixed(decimals)
-}
-function pct(v) {
-  return v == null ? '—' : (v > 0 ? '+' : '') + v.toFixed(1) + '%'
-}
-function deltaClass(delta) {
-  if (delta == null) return 'text-gray-600'
-  if (delta >  5)   return 'text-red-400'
-  if (delta < -5)   return 'text-green-400'
+function fmt(v) { return v == null ? '—' : Number(v).toFixed(3) }
+function pct(v) { return v == null ? '—' : (v > 0 ? '+' : '') + v.toFixed(1) + '%' }
+function deltaClass(d) {
+  if (d == null) return 'text-gray-600'
+  if (d >  5)   return 'text-red-400'
+  if (d < -5)   return 'text-green-400'
   return 'text-gray-500'
 }
 
@@ -62,18 +47,14 @@ function fetchOne(id, workload, metric, system_id, config_preset, setSeries) {
     .catch(e   => setSeries(s => s.map(x => x.id === id ? { ...x, error: e.message, loading: false } : x)))
 }
 
-// Collect the union of kernel versions across all loaded series, ordered by
-// first appearance in whichever series has the most data points.
-function mergedKernels(series) {
+// All unique kernel versions ordered by first appearance across all series
+function allKernels(series) {
   const seen = new Set()
   const order = []
-  const longest = [...series].sort((a, b) => b.data.length - a.data.length)
-  for (const s of longest) {
+  // Sort by most data points first so primary kernel order dominates
+  for (const s of [...series].sort((a, b) => b.data.length - a.data.length)) {
     for (const d of s.data) {
-      if (!seen.has(d.kernel_version)) {
-        seen.add(d.kernel_version)
-        order.push(d.kernel_version)
-      }
+      if (!seen.has(d.kernel_version)) { seen.add(d.kernel_version); order.push(d.kernel_version) }
     }
   }
   return order
@@ -117,41 +98,51 @@ export default function Compare() {
     entries.forEach(e => fetchOne(e.id, e.workload, e.metric, sysId, cfg, setSeries))
   }
 
-  // ── Chart traces ────────────────────────────────────────────────────────────
+  // ── Derived data ─────────────────────────────────────────────────────────────
   const loadedSeries = series.filter(s => !s.loading && !s.error && s.data.length > 0)
+  const kernelVersions = allKernels(loadedSeries)
+  const mixedUnits = series.length > 1 && new Set(series.map(s => s.metric)).size > 1
 
-  const traces = series.map((s, i) => {
-    const rows = norm ? normalise(s.data) : s.data
-    const c    = clr(i)
+  // X-axis labels: one per (workload, metric) series
+  const xLabels = loadedSeries.map(s => `${s.workload} / ${s.metric}`)
+
+  // One trace per kernel version; X = series label, Y = mean for that series×kernel
+  const traces = kernelVersions.map((kver, ki) => {
+    const c = kclr(ki)
+    const rows_per_series = loadedSeries.map(s => {
+      const rows = norm ? normalise(s.data) : s.data
+      return rows.find(d => d.kernel_version === kver) ?? null
+    })
     return {
-      type: 'scatter', mode: 'lines+markers',
-      x: rows.map(d => d.kernel_version),
-      y: rows.map(d => d.mean),
+      type: 'bar',
+      name: kver,
+      x: xLabels,
+      y: rows_per_series.map(d => d?.mean ?? null),
       error_y: {
         visible: true, type: 'data',
-        array:      rows.map(d => d.max - d.mean),
-        arrayminus: rows.map(d => d.mean - d.min),
-        color: c, thickness: 1.5, opacity: 0.6,
+        array:      rows_per_series.map(d => d ? d.max - d.mean : 0),
+        arrayminus: rows_per_series.map(d => d ? d.mean - d.min  : 0),
+        color: c, thickness: 1.5,
       },
-      marker: { color: c, size: 7 },
-      line:   { color: c, width: 2.5 },
-      name: `${s.workload} / ${s.metric}`,
-      hovertemplate: `<b>%{x}</b><br>${s.workload} / ${s.metric}: %{y:.3f}<extra></extra>`,
+      marker: { color: c, opacity: 0.85 },
+      hovertemplate: '<b>%{x}</b><br>' + kver + ': %{y:.3f}<extra></extra>',
     }
   })
 
-  // ── Combined comparison table ────────────────────────────────────────────────
-  const kernels = mergedKernels(loadedSeries)
-
-  // Build a lookup: { seriesId → { kernel_version → dataPoint } }
-  const lookup = {}
-  for (const s of loadedSeries) {
+  // ── Comparison table: rows = series, columns = kernel versions ───────────────
+  // For each cell: show mean + Δ vs previous kernel
+  function seriesRows(s) {
     const rows = norm ? normalise(s.data) : s.data
-    lookup[s.id] = Object.fromEntries(rows.map(d => [d.kernel_version, d]))
+    return Object.fromEntries(rows.map((d, i) => [
+      d.kernel_version,
+      {
+        mean:  d.mean,
+        delta: i > 0
+          ? (d.mean - rows[i-1].mean) / Math.abs(rows[i-1].mean) * 100
+          : null,
+      },
+    ]))
   }
-
-  const anyLoading = series.some(s => s.loading)
-  const mixedUnits = series.length > 1 && new Set(series.map(s => s.metric)).size > 1
 
   return (
     <div className="space-y-6">
@@ -181,7 +172,7 @@ export default function Compare() {
               <div className="text-sm text-gray-300">Normalize to baseline</div>
               {mixedUnits && !norm && (
                 <div className="text-xs text-amber-500 mt-0.5">
-                  Recommended when metrics have different units
+                  Recommended — metrics have different units
                 </div>
               )}
             </div>
@@ -234,12 +225,15 @@ export default function Compare() {
             <span
               key={s.id}
               className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm"
-              style={{ background: clr(i) + '1a', border: `1px solid ${clr(i)}55`, color: '#e5e7eb' }}
+              style={{ background: SERIES_PALETTE[i % SERIES_PALETTE.length] + '1a',
+                       border: `1px solid ${SERIES_PALETTE[i % SERIES_PALETTE.length]}55`,
+                       color: '#e5e7eb' }}
             >
-              <span style={{ background: clr(i) }} className="inline-block w-2 h-2 rounded-full flex-shrink-0" />
+              <span style={{ background: SERIES_PALETTE[i % SERIES_PALETTE.length] }}
+                    className="inline-block w-2 h-2 rounded-full flex-shrink-0" />
               {s.workload} / {s.metric}
               {s.loading && <span className="text-xs text-gray-500 ml-1">…</span>}
-              {s.error   && <span className="text-xs text-red-400 ml-1">!</span>}
+              {s.error   && <span className="text-xs text-red-400 ml-1" title={s.error}>!</span>}
               <button
                 onClick={() => setSeries(prev => prev.filter(x => x.id !== s.id))}
                 className="ml-1 opacity-50 hover:opacity-100 leading-none"
@@ -256,93 +250,125 @@ export default function Compare() {
       {/* ── Empty state ── */}
       {series.length === 0 && (
         <div className="text-center py-24 text-gray-600">
-          Select a system, then add workload / metric series to compare.
+          Select a system, then add workload / metric entries to compare.
         </div>
       )}
 
-      {/* ── Combined chart ── */}
+      {/* ── Grouped bar chart ── */}
       {series.length > 0 && (
         <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
-          {anyLoading && (
-            <p className="text-xs text-gray-500 mb-3 animate-pulse">Loading series data…</p>
+          {series.some(s => s.loading) && (
+            <p className="text-xs text-gray-500 mb-3 animate-pulse">Fetching data…</p>
           )}
-          <Plot
-            data={traces}
-            layout={{
-              ...LAYOUT_BASE,
-              yaxis: {
-                ...LAYOUT_BASE.yaxis,
-                title: norm
-                  ? 'Value (% of 1st kernel)'
-                  : (series.length === 1 ? series[0].metric : 'Value'),
-              },
-              margin: { t: 50, r: 20, b: 90, l: 80 },
-              height: 460,
-            }}
-            style={{ width: '100%', height: 460 }}
-            config={{ responsive: true, displayModeBar: false }}
-          />
+          {loadedSeries.length > 0 ? (
+            <Plot
+              data={traces}
+              layout={{
+                paper_bgcolor: 'transparent',
+                plot_bgcolor:  'transparent',
+                font:    { color: '#e5e7eb', size: 12 },
+                barmode: 'group',
+                bargap:  0.25,
+                bargroupgap: 0.08,
+                xaxis: {
+                  gridcolor: '#1f2937',
+                  zeroline: false,
+                  tickangle: xLabels.length > 4 ? -35 : 0,
+                  automargin: true,
+                },
+                yaxis: {
+                  gridcolor: '#1f2937',
+                  zeroline: false,
+                  title: norm ? 'Value (% of 1st kernel)' : 'Value',
+                },
+                legend: {
+                  bgcolor: 'rgba(15,23,42,0.8)',
+                  bordercolor: '#374151',
+                  borderwidth: 1,
+                  title: { text: 'Kernel version', font: { color: '#9ca3af', size: 11 } },
+                },
+                margin: { t: 20, r: 20, b: 120, l: 80 },
+                height: 460,
+                hovermode: 'closest',
+              }}
+              style={{ width: '100%', height: 460 }}
+              config={{ responsive: true, displayModeBar: false }}
+            />
+          ) : (
+            !series.some(s => s.loading) && (
+              <div className="py-16 text-center text-gray-600 text-sm">
+                No data returned for the selected filters.
+              </div>
+            )
+          )}
         </div>
       )}
 
-      {/* ── Combined comparison table ── */}
-      {loadedSeries.length > 0 && kernels.length > 0 && (
+      {/* ── Comparison table: rows = workload/metric, cols = kernel versions ── */}
+      {loadedSeries.length > 0 && kernelVersions.length > 0 && (
         <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
           <h2 className="text-sm font-medium text-gray-400 mb-4 uppercase tracking-wide">
-            Per-kernel comparison
-            {norm && <span className="ml-2 text-gray-600 normal-case font-normal">(normalised — 1st kernel = 100)</span>}
+            Per-kernel breakdown
+            {norm && (
+              <span className="ml-2 text-gray-600 normal-case font-normal">
+                (normalised — 1st kernel = 100)
+              </span>
+            )}
           </h2>
           <div className="overflow-x-auto">
             <table className="w-full text-xs border-collapse">
               <thead>
+                {/* Kernel version headers */}
                 <tr className="border-b border-gray-700">
-                  <th className="text-left py-2 pr-4 text-gray-500 font-normal">Kernel</th>
-                  {loadedSeries.map((s, i) => (
-                    <th key={s.id} colSpan={2}
-                      className="py-2 px-2 text-center font-medium"
-                      style={{ color: clr(i) }}
+                  <th className="text-left py-2 pr-6 text-gray-500 font-normal w-48">Workload / Metric</th>
+                  {kernelVersions.map((kver, ki) => (
+                    <th key={kver} colSpan={2}
+                      className="py-2 px-2 text-center font-medium whitespace-nowrap"
+                      style={{ color: kclr(ki) }}
                     >
-                      {s.workload} / {s.metric}
+                      {kver}
                     </th>
                   ))}
                 </tr>
                 <tr className="border-b border-gray-800 text-gray-600">
-                  <th className="py-1.5 pr-4 font-normal text-left" />
-                  {loadedSeries.map(s => (
+                  <th className="py-1.5 pr-6 font-normal" />
+                  {kernelVersions.map(kver => (
                     <>
-                      <th key={s.id + '-m'} className="py-1.5 px-2 text-right font-normal">Mean</th>
-                      <th key={s.id + '-d'} className="py-1.5 px-2 text-right font-normal">Δ prev</th>
+                      <th key={kver + '-m'} className="py-1.5 px-2 text-right font-normal">Mean</th>
+                      <th key={kver + '-d'} className="py-1.5 px-2 text-right font-normal">Δ prev</th>
                     </>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {kernels.map(kver => (
-                  <tr key={kver} className="border-b border-gray-800/50 last:border-0 hover:bg-gray-800/30">
-                    <td className="py-2 pr-4 font-mono text-gray-300 whitespace-nowrap">{kver}</td>
-                    {loadedSeries.map((s, i) => {
-                      const byKernel = lookup[s.id] ?? {}
-                      const rows     = norm ? normalise(s.data) : s.data
-                      const idx      = rows.findIndex(d => d.kernel_version === kver)
-                      const d        = idx >= 0 ? rows[idx] : null
-                      const prev     = idx > 0 ? rows[idx - 1] : null
-                      const delta    = d && prev
-                        ? (d.mean - prev.mean) / Math.abs(prev.mean) * 100
-                        : null
-                      return (
-                        <>
-                          <td key={s.id + '-m'} className="py-2 px-2 text-right font-mono"
-                            style={{ color: d ? clr(i) : '#4b5563' }}>
-                            {d ? fmt(d.mean) : '—'}
-                          </td>
-                          <td key={s.id + '-d'} className={`py-2 px-2 text-right font-mono ${deltaClass(delta)}`}>
-                            {pct(delta)}
-                          </td>
-                        </>
-                      )
-                    })}
-                  </tr>
-                ))}
+                {loadedSeries.map((s, si) => {
+                  const byKernel = seriesRows(s)
+                  return (
+                    <tr key={s.id} className="border-b border-gray-800/50 last:border-0 hover:bg-gray-800/30">
+                      <td className="py-2 pr-6 font-medium whitespace-nowrap"
+                          style={{ color: SERIES_PALETTE[si % SERIES_PALETTE.length] }}>
+                        <div>{s.workload}</div>
+                        <div className="font-mono text-gray-500 font-normal">{s.metric}</div>
+                      </td>
+                      {kernelVersions.map((kver, ki) => {
+                        const cell = byKernel[kver]
+                        return (
+                          <>
+                            <td key={kver + '-m'}
+                              className="py-2 px-2 text-right font-mono"
+                              style={{ color: cell ? kclr(ki) : '#4b5563' }}>
+                              {cell ? fmt(cell.mean) : '—'}
+                            </td>
+                            <td key={kver + '-d'}
+                              className={`py-2 px-2 text-right font-mono ${deltaClass(cell?.delta)}`}>
+                              {pct(cell?.delta ?? null)}
+                            </td>
+                          </>
+                        )
+                      })}
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
