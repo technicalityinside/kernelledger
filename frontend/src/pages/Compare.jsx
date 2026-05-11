@@ -16,14 +16,31 @@ const LAYOUT_BASE = {
   xaxis: { gridcolor: '#1f2937', zeroline: false, tickangle: -30 },
   yaxis: { gridcolor: '#1f2937', zeroline: false },
   hovermode: 'x unified',
-  legend: { bgcolor: 'transparent', bordercolor: '#374151', borderwidth: 1 },
+  legend: {
+    bgcolor: 'rgba(15,23,42,0.8)',
+    bordercolor: '#374151',
+    borderwidth: 1,
+    orientation: 'h',
+    yanchor: 'bottom', y: 1.02,
+    xanchor: 'left',   x: 0,
+  },
 }
 
 let _uid = 0
 const nextId = () => ++_uid
 
-function fmt(v) { return v == null ? '—' : Number(v).toFixed(3) }
-function pct(v) { return v == null ? '—' : (v > 0 ? '+' : '') + v.toFixed(1) + '%' }
+function fmt(v, decimals = 3) {
+  return v == null ? '—' : Number(v).toFixed(decimals)
+}
+function pct(v) {
+  return v == null ? '—' : (v > 0 ? '+' : '') + v.toFixed(1) + '%'
+}
+function deltaClass(delta) {
+  if (delta == null) return 'text-gray-600'
+  if (delta >  5)   return 'text-red-400'
+  if (delta < -5)   return 'text-green-400'
+  return 'text-gray-500'
+}
 
 function normalise(data) {
   if (!data.length) return data
@@ -45,115 +62,37 @@ function fetchOne(id, workload, metric, system_id, config_preset, setSeries) {
     .catch(e   => setSeries(s => s.map(x => x.id === id ? { ...x, error: e.message, loading: false } : x)))
 }
 
-function SeriesCard({ s, colorIdx, norm }) {
-  const rows = norm ? normalise(s.data) : s.data
-  const c    = clr(colorIdx)
-  const yTitle = norm ? `${s.metric} (% of 1st kernel)` : s.metric
-
-  return (
-    <div className="bg-gray-900 rounded-xl border border-gray-800 p-4 space-y-4">
-      <div className="flex items-center gap-2">
-        <span style={{ background: c }} className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0" />
-        <span className="text-sm font-semibold text-gray-200">{s.workload}</span>
-        <span className="text-gray-700">/</span>
-        <span className="text-sm text-gray-400 font-mono">{s.metric}</span>
-      </div>
-
-      {s.loading && (
-        <div className="py-10 text-center text-gray-500 text-sm animate-pulse">Loading…</div>
-      )}
-      {s.error && (
-        <div className="text-red-400 text-sm py-4">{s.error}</div>
-      )}
-      {!s.loading && !s.error && s.data.length === 0 && (
-        <div className="py-10 text-center text-gray-600 text-sm">No data for this selection.</div>
-      )}
-
-      {!s.loading && !s.error && rows.length > 0 && (
-        <>
-          <Plot
-            data={[{
-              type: 'scatter', mode: 'lines+markers',
-              x: rows.map(d => d.kernel_version),
-              y: rows.map(d => d.mean),
-              error_y: {
-                visible: true, type: 'data',
-                array:      rows.map(d => d.max - d.mean),
-                arrayminus: rows.map(d => d.mean - d.min),
-                color: c, thickness: 1.5,
-              },
-              marker: { color: c, size: 6 },
-              line:   { color: c, width: 2 },
-              name: `${s.workload}/${s.metric}`,
-              hovertemplate: '<b>%{x}</b><br>%{y:.3f}<extra></extra>',
-            }]}
-            layout={{
-              ...LAYOUT_BASE,
-              yaxis: { ...LAYOUT_BASE.yaxis, title: yTitle },
-              margin: { t: 10, r: 10, b: 80, l: 70 },
-              showlegend: false,
-            }}
-            style={{ width: '100%', height: 260 }}
-            config={{ responsive: true, displayModeBar: false }}
-          />
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs border-collapse">
-              <thead>
-                <tr className="text-gray-600 border-b border-gray-800">
-                  <th className="text-left py-1.5 pr-3 font-normal">Kernel</th>
-                  <th className="text-right pr-3 font-normal">Mean</th>
-                  <th className="text-right pr-3 font-normal">Min</th>
-                  <th className="text-right pr-3 font-normal">Max</th>
-                  <th className="text-right pr-3 font-normal">Stdev</th>
-                  <th className="text-right font-normal">Δ prev</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((d, i) => {
-                  const prev  = rows[i - 1]
-                  const delta = prev ? (d.mean - prev.mean) / Math.abs(prev.mean) * 100 : null
-                  const dc    = delta == null ? 'text-gray-600'
-                    : delta > 5  ? 'text-red-400'
-                    : delta < -5 ? 'text-green-400'
-                    : 'text-gray-400'
-                  return (
-                    <tr key={d.kernel_id} className="border-b border-gray-800/40 last:border-0">
-                      <td className="py-1.5 pr-3 font-mono text-gray-300">{d.kernel_version}</td>
-                      <td className="py-1.5 pr-3 text-right font-mono">{fmt(d.mean)}</td>
-                      <td className="py-1.5 pr-3 text-right font-mono text-green-500">{fmt(d.min)}</td>
-                      <td className="py-1.5 pr-3 text-right font-mono text-red-400">{fmt(d.max)}</td>
-                      <td className="py-1.5 pr-3 text-right font-mono text-gray-500">{fmt(d.stdev)}</td>
-                      <td className={`py-1.5 text-right font-mono ${dc}`}>{pct(delta)}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </div>
-  )
+// Collect the union of kernel versions across all loaded series, ordered by
+// first appearance in whichever series has the most data points.
+function mergedKernels(series) {
+  const seen = new Set()
+  const order = []
+  const longest = [...series].sort((a, b) => b.data.length - a.data.length)
+  for (const s of longest) {
+    for (const d of s.data) {
+      if (!seen.has(d.kernel_version)) {
+        seen.add(d.kernel_version)
+        order.push(d.kernel_version)
+      }
+    }
+  }
+  return order
 }
 
 export default function Compare() {
   const [filters, setFilters] = useState(null)
-  const [sysId,   setSysId]   = useState('')
-  const [cfg,     setCfg]     = useState('')
-  const [addWl,   setAddWl]   = useState('')
-  const [addMet,  setAddMet]  = useState('')
-  const [series,  setSeries]  = useState([])
-  const [norm,    setNorm]    = useState(false)
-  const [view,    setView]    = useState('grid')   // 'grid' | 'overlay'
+  const [sysId,  setSysId]   = useState('')
+  const [cfg,    setCfg]     = useState('')
+  const [addWl,  setAddWl]   = useState('')
+  const [addMet, setAddMet]  = useState('')
+  const [series, setSeries]  = useState([])
+  const [norm,   setNorm]    = useState(false)
 
-  // Always-current reference used by effects that run after state updates
   const seriesRef = useRef(series)
   seriesRef.current = series
 
   useEffect(() => { api.filters().then(setFilters).catch(() => {}) }, [])
 
-  // Re-fetch all series when system or config changes
   useEffect(() => {
     if (!sysId) return
     seriesRef.current.forEach(s => fetchOne(s.id, s.workload, s.metric, sysId, cfg, setSeries))
@@ -178,7 +117,10 @@ export default function Compare() {
     entries.forEach(e => fetchOne(e.id, e.workload, e.metric, sysId, cfg, setSeries))
   }
 
-  const overlayTraces = series.map((s, i) => {
+  // ── Chart traces ────────────────────────────────────────────────────────────
+  const loadedSeries = series.filter(s => !s.loading && !s.error && s.data.length > 0)
+
+  const traces = series.map((s, i) => {
     const rows = norm ? normalise(s.data) : s.data
     const c    = clr(i)
     return {
@@ -189,20 +131,34 @@ export default function Compare() {
         visible: true, type: 'data',
         array:      rows.map(d => d.max - d.mean),
         arrayminus: rows.map(d => d.mean - d.min),
-        color: c, thickness: 1, opacity: 0.5,
+        color: c, thickness: 1.5, opacity: 0.6,
       },
-      marker: { color: c, size: 6 },
-      line:   { color: c, width: 2 },
+      marker: { color: c, size: 7 },
+      line:   { color: c, width: 2.5 },
       name: `${s.workload} / ${s.metric}`,
+      hovertemplate: `<b>%{x}</b><br>${s.workload} / ${s.metric}: %{y:.3f}<extra></extra>`,
     }
   })
+
+  // ── Combined comparison table ────────────────────────────────────────────────
+  const kernels = mergedKernels(loadedSeries)
+
+  // Build a lookup: { seriesId → { kernel_version → dataPoint } }
+  const lookup = {}
+  for (const s of loadedSeries) {
+    const rows = norm ? normalise(s.data) : s.data
+    lookup[s.id] = Object.fromEntries(rows.map(d => [d.kernel_version, d]))
+  }
+
+  const anyLoading = series.some(s => s.loading)
+  const mixedUnits = series.length > 1 && new Set(series.map(s => s.metric)).size > 1
 
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold text-gray-100">Kernel Comparison</h1>
 
-      {/* ── Top controls ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 p-4 bg-gray-900 rounded-xl border border-gray-800">
+      {/* ── Controls ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 p-4 bg-gray-900 rounded-xl border border-gray-800">
         <Select
           label="System" value={sysId}
           onChange={setSysId}
@@ -221,23 +177,19 @@ export default function Compare() {
               onChange={e => setNorm(e.target.checked)}
               className="w-4 h-4 rounded accent-blue-500"
             />
-            <span className="text-sm text-gray-300">Normalize to baseline</span>
+            <div>
+              <div className="text-sm text-gray-300">Normalize to baseline</div>
+              {mixedUnits && !norm && (
+                <div className="text-xs text-amber-500 mt-0.5">
+                  Recommended when metrics have different units
+                </div>
+              )}
+            </div>
           </label>
-        </div>
-        <div className="flex items-end gap-2">
-          {['grid', 'overlay'].map(v => (
-            <button key={v}
-              onClick={() => setView(v)}
-              className={`flex-1 py-2 text-sm rounded-lg border capitalize transition-colors
-                ${view === v
-                  ? 'bg-blue-600 border-blue-500 text-white'
-                  : 'bg-transparent border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300'}`}
-            >{v}</button>
-          ))}
         </div>
       </div>
 
-      {/* ── Add series ── */}
+      {/* ── Series builder ── */}
       <div className="flex flex-wrap gap-3 p-4 bg-gray-900 rounded-xl border border-gray-800 items-end">
         <div className="flex-1 min-w-[140px]">
           <Select
@@ -275,7 +227,7 @@ export default function Compare() {
         )}
       </div>
 
-      {/* ── Active series tags ── */}
+      {/* ── Series tags ── */}
       {series.length > 0 && (
         <div className="flex flex-wrap gap-2 items-center">
           {series.map((s, i) => (
@@ -286,6 +238,8 @@ export default function Compare() {
             >
               <span style={{ background: clr(i) }} className="inline-block w-2 h-2 rounded-full flex-shrink-0" />
               {s.workload} / {s.metric}
+              {s.loading && <span className="text-xs text-gray-500 ml-1">…</span>}
+              {s.error   && <span className="text-xs text-red-400 ml-1">!</span>}
               <button
                 onClick={() => setSeries(prev => prev.filter(x => x.id !== s.id))}
                 className="ml-1 opacity-50 hover:opacity-100 leading-none"
@@ -306,38 +260,92 @@ export default function Compare() {
         </div>
       )}
 
-      {/* ── Grid view ── */}
-      {series.length > 0 && view === 'grid' && (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-          {series.map((s, i) => (
-            <SeriesCard key={s.id} s={s} colorIdx={i} norm={norm} />
-          ))}
+      {/* ── Combined chart ── */}
+      {series.length > 0 && (
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+          {anyLoading && (
+            <p className="text-xs text-gray-500 mb-3 animate-pulse">Loading series data…</p>
+          )}
+          <Plot
+            data={traces}
+            layout={{
+              ...LAYOUT_BASE,
+              yaxis: {
+                ...LAYOUT_BASE.yaxis,
+                title: norm
+                  ? 'Value (% of 1st kernel)'
+                  : (series.length === 1 ? series[0].metric : 'Value'),
+              },
+              margin: { t: 50, r: 20, b: 90, l: 80 },
+              height: 460,
+            }}
+            style={{ width: '100%', height: 460 }}
+            config={{ responsive: true, displayModeBar: false }}
+          />
         </div>
       )}
 
-      {/* ── Overlay view ── */}
-      {series.length > 0 && view === 'overlay' && (
-        <div className="bg-gray-900 rounded-xl border border-gray-800 p-5 space-y-3">
-          {norm ? (
-            <p className="text-xs text-gray-500">
-              Each series' first kernel = 100. Values show % relative to that baseline.
-            </p>
-          ) : series.length > 1 && (
-            <p className="text-xs text-amber-600/80">
-              Tip: enable "Normalize to baseline" to compare series with different units on the same scale.
-            </p>
-          )}
-          <Plot
-            data={overlayTraces}
-            layout={{
-              ...LAYOUT_BASE,
-              yaxis: { ...LAYOUT_BASE.yaxis, title: norm ? 'Value (% of 1st kernel)' : 'Value' },
-              margin: { t: 20, r: 20, b: 90, l: 80 },
-              height: 500,
-            }}
-            style={{ width: '100%', height: 500 }}
-            config={{ responsive: true, displayModeBar: false }}
-          />
+      {/* ── Combined comparison table ── */}
+      {loadedSeries.length > 0 && kernels.length > 0 && (
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+          <h2 className="text-sm font-medium text-gray-400 mb-4 uppercase tracking-wide">
+            Per-kernel comparison
+            {norm && <span className="ml-2 text-gray-600 normal-case font-normal">(normalised — 1st kernel = 100)</span>}
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-gray-700">
+                  <th className="text-left py-2 pr-4 text-gray-500 font-normal">Kernel</th>
+                  {loadedSeries.map((s, i) => (
+                    <th key={s.id} colSpan={2}
+                      className="py-2 px-2 text-center font-medium"
+                      style={{ color: clr(i) }}
+                    >
+                      {s.workload} / {s.metric}
+                    </th>
+                  ))}
+                </tr>
+                <tr className="border-b border-gray-800 text-gray-600">
+                  <th className="py-1.5 pr-4 font-normal text-left" />
+                  {loadedSeries.map(s => (
+                    <>
+                      <th key={s.id + '-m'} className="py-1.5 px-2 text-right font-normal">Mean</th>
+                      <th key={s.id + '-d'} className="py-1.5 px-2 text-right font-normal">Δ prev</th>
+                    </>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {kernels.map(kver => (
+                  <tr key={kver} className="border-b border-gray-800/50 last:border-0 hover:bg-gray-800/30">
+                    <td className="py-2 pr-4 font-mono text-gray-300 whitespace-nowrap">{kver}</td>
+                    {loadedSeries.map((s, i) => {
+                      const byKernel = lookup[s.id] ?? {}
+                      const rows     = norm ? normalise(s.data) : s.data
+                      const idx      = rows.findIndex(d => d.kernel_version === kver)
+                      const d        = idx >= 0 ? rows[idx] : null
+                      const prev     = idx > 0 ? rows[idx - 1] : null
+                      const delta    = d && prev
+                        ? (d.mean - prev.mean) / Math.abs(prev.mean) * 100
+                        : null
+                      return (
+                        <>
+                          <td key={s.id + '-m'} className="py-2 px-2 text-right font-mono"
+                            style={{ color: d ? clr(i) : '#4b5563' }}>
+                            {d ? fmt(d.mean) : '—'}
+                          </td>
+                          <td key={s.id + '-d'} className={`py-2 px-2 text-right font-mono ${deltaClass(delta)}`}>
+                            {pct(delta)}
+                          </td>
+                        </>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
